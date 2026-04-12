@@ -1,0 +1,59 @@
+#pragma once
+
+#include <vector>
+#include <string>
+#include <SDL3/SDL.h>
+
+class UserInterface
+{
+public:
+    // =========================================================
+    // DATA STRUCTS
+    // =========================================================
+
+    struct GlobalData
+    {
+        int totalThreads = 0;
+        float totalSimulationsPerSec = 0.0f;
+        bool running = false;
+    };
+
+    struct ThreadData
+    {
+        int id = 0;
+        float progress = 0.0f;
+        float simsPerSec = 0.0f;
+        std::string status;
+    };
+
+    // =========================================================
+    // LIFECYCLE
+    // =========================================================
+
+    int CreateWindow();
+    int CloseWindow();
+
+    void BeginFrame();
+    void EndFrame();
+
+    // =========================================================
+    // RENDER ENTRY
+    // =========================================================
+
+    void Render(GlobalData& global,
+                const ThreadData& gpuThread,
+                const std::vector<ThreadData>& mctsThreads);
+
+private:
+    // =========================================================
+    // PANELS
+    // =========================================================
+
+    void RenderGlobalPanel(GlobalData& global);
+
+    void RenderGPUPanel(const ThreadData& gpu);
+
+    void RenderMCTSThreads(const std::vector<ThreadData>& threads);
+
+    void RenderBottomBar(GlobalData& global);
+};

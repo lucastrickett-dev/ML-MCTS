@@ -1,60 +1,123 @@
-#include <iostream>
-#include <thread>
-#include <chrono>
-#include <forward_list>
-#include <random>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_opengl.h>
 
-using namespace std;
+#include "imgui.h"
+#include "backends/imgui_impl_sdl3.h"
+#include "backends/imgui_impl_opengl3.h"
 
+#include <vector>
 
-#define MCTS_SIMULATIONS_SIZE 100
+#include "user_interface.h"
 
-// Function: MCTSWorkerThread
-// Description: This function will be run by the MCTS worker thread. It will perform
-// MCTS simulations and update the results to a shared buffer to be sent to the GPU
-// for training the neural network.
-void MCTSAgentThread()
-{    
-    // Main loop for MCTS simulations
-    while (true) {
-        
-        // Perform MCTS simulations
-        // Organise MCTS simulations and store results in a shared buffer
-    }
-}
+bool running = true;
 
-
-// Function: GPUWorkerThread
-// Description: This function will be run by the GPU worker thread. 
-// It will receive the results from the MCTS worker thread, perform training 
-// on the neural network, and update the neural network weights accordingly.
-void InferenceDispatcherThread()
-{
-    
-}
-
-
-
-void ImGUIInterfaceSetup(){
-
-}
-
-
+// ─────────────────────────────────────────────
+// YOUR UI SYSTEM
+// ─────────────────────────────────────────────
+UserInterface ui;
+UserInterface::GlobalData global;
+UserInterface::ThreadData gpu;
+std::vector<UserInterface::ThreadData> mcts;
 
 int main()
-{    
-    ImGUIInterfaceSetup()
+{
+    // =========================================================
+    // SDL3 INIT
+    // =========================================================
+    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+    {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        return -1;
+    }
 
+    SDL_Window* window = SDL_CreateWindow(
+        "ML-MCTS",
+        1280, 720,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+    );
 
-    // // one thread per MCTS worker
-    // std::vector<std::thread> workers;
+    if (!window)
+    {
+        SDL_Log("Failed to create window: %s", SDL_GetError());
+        return -1;
+    }
 
-    // // one inference thread owning the GPU
-    // std::thread inference_thread;
+    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
+    SDL_GL_MakeCurrent(window, gl_context);
+    SDL_GL_SetSwapInterval(1);
 
-    // // one training thread
-    // std::thread training_thread;    
- 
- 
+    // =========================================================
+    // IMGUI INIT
+    // =========================================================
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
+    ImGui_ImplOpenGL3_Init("#version 130");
+
+    ui.Init();
+
+    // =========================================================
+    // MAIN LOOP
+    // =========================================================
+    SDL_Event event;
+
+    while (running)
+    {
+        // ─────────────────────────────
+        // EVENTS
+        // ─────────────────────────────
+        while (SDL_PollEvent(&event))
+        {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+
+            if (event.type == SDL_EVENT_QUIT)
+                running = false;
+        }
+
+        // ─────────────────────────────
+        // FRAME START
+        // ─────────────────────────────
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        ui.BeginFrame();
+
+        // ─────────────────────────────
+        // YOUR UI
+        // ─────────────────────────────
+        ui.Render(global, gpu, mcts);
+
+        ui.EndFrame();
+
+        ImGui::Render();
+
+        // ─────────────────────────────
+        // RENDER
+        // ─────────────────────────────
+        glViewport(0, 0, 1280, 720);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        SDL_GL_SwapWindow(window);
+    }
+
+    // =========================================================
+    // CLEANUP
+    // =========================================================
+    ui.Shutdown();
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+
+    SDL_GL_DestroyContext(gl_context);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
     return 0;
 }

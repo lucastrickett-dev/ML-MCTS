@@ -1,15 +1,33 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 project(ML-MCTS CXX)
 
-# ── C++ standard ────────────────────────────────────────────────────────────
+# ==============================================================
+# 🧠 C++ CONFIG
+# ==============================================================
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ── ImGui + SDL + OpenGL ───────────────────────────────────────────────────
-find_package(SDL2 REQUIRED)
-find_package(OpenGL REQUIRED)
+# ==============================================================
+# 📦 OUTPUT DIRS
+# ==============================================================
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
+# ==============================================================
+# 🚨 SDL3 SAFETY (prevents Wayland/X11 chaos)
+# ==============================================================
+set(SDL_VIDEO_WAYLAND OFF CACHE BOOL "" FORCE)
+set(SDL_VIDEO_X11 ON CACHE BOOL "" FORCE)
+
+# ==============================================================
+# 🧩 SDL3
+# ==============================================================
+add_subdirectory(third_party/SDL EXCLUDE_FROM_ALL)
+
+# ==============================================================
+# 🖼️ IMGUI
+# ==============================================================
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/third_party/imgui")
 
 set(IMGUI_SOURCES
@@ -17,87 +35,50 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-# ── libtorch ────────────────────────────────────────────────────────────────
-set(Torch_DIR "${CMAKE_SOURCE_DIR}/third_party/libtorch/share/cmake/Torch")
-find_package(Torch REQUIRED)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
-
-# ── game selection ───────────────────────────────────────────────────────────
-# Define GAME as a cache variable (user can override with -DGAME=...)
-set(GAME "UltimateXOs" CACHE STRING "Game to build (folder name inside Games/)")
-
-set(GAME_DIR "${CMAKE_SOURCE_DIR}/Games/${GAME}")
-
-# Validate it exists
-if(NOT EXISTS "${GAME_DIR}")
-    file(GLOB AVAILABLE_GAMES RELATIVE "${CMAKE_SOURCE_DIR}/Games" "${CMAKE_SOURCE_DIR}/Games/*")
-
-    message(FATAL_ERROR
-        "Invalid GAME='${GAME}'\n"
-        "Available games: ${AVAILABLE_GAMES}\n"
-        "Use: cmake -B build -DGAME=<name>")
-endif()
-
-message(STATUS "Building with game: ${GAME}")
-
-
-# ── gather sources ───────────────────────────────────────────────────────────
-file(GLOB_RECURSE ALPHACORE_SOURCES CONFIGURE_DEPENDS
-    "mcts/src/*.cpp"
+# ==============================================================
+# 📁 SOURCES
+# ==============================================================
+file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/*.cpp"
 )
 
-file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
-    "${GAME_DIR}/src/*.cpp"
-)
-
-# ── executable ───────────────────────────────────────────────────────────────
+# ==============================================================
+# 🚀 EXECUTABLE
+# ==============================================================
 add_executable(ML-MCTS
-    src/main.cpp
-    ${ALPHACORE_SOURCES}
-    ${GAME_SOURCES}
+    ${PROJECT_SOURCES}
     ${IMGUI_SOURCES}
 )
 
-# ── includes ─────────────────────────────────────────────────────────────────
+# ==============================================================
+# 📂 INCLUDE PATHS
+# ==============================================================
 target_include_directories(ML-MCTS PRIVATE
-    mcts/include
-    Games
-    "${GAME_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/include"
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )
 
-# ── link ─────────────────────────────────────────────────────────────────────
+# ==============================================================
+# 🧩 DEPENDENCIES
+# ==============================================================
+find_package(OpenGL REQUIRED)
+
+# ==============================================================
+# 🔗 LINK LIBRARIES
+# ==============================================================
 target_link_libraries(ML-MCTS PRIVATE
-    "${TORCH_LIBRARIES}"
-    SDL2::SDL2
+    SDL3::SDL3
     OpenGL::GL
 )
 
-# Linux-specific fix (dl)
+# ==============================================================
+# 🐧 LINUX FIX
+# ==============================================================
 if(UNIX AND NOT APPLE)
     target_link_libraries(ML-MCTS PRIVATE dl)
-endif()
-
-# ── compile definitions ──────────────────────────────────────────────────────
-target_compile_definitions(ML-MCTS PRIVATE
-    GAME_NAME="${GAME}"
-)
-
-# ── RPATH (Linux / macOS) ────────────────────────────────────────────────────
-if(APPLE)
-    set_target_properties(ML-MCTS PROPERTIES
-        BUILD_RPATH  "${TORCH_INSTALL_PREFIX}/lib"
-        INSTALL_RPATH "@loader_path/../lib"
-    )
-elseif(UNIX)
-    set_target_properties(ML-MCTS PROPERTIES
-        BUILD_RPATH  "${TORCH_INSTALL_PREFIX}/lib"
-        INSTALL_RPATH "$ORIGIN/../lib"
-    )
 endif()

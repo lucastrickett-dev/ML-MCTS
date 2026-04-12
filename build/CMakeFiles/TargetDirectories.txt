@@ -1,0 +1,8 @@
+/home/lucas/Projects/ML-MCTS/build/CMakeFiles/ML-MCTS.dir
+/home/lucas/Projects/ML-MCTS/build/CMakeFiles/edit_cache.dir
+/home/lucas/Projects/ML-MCTS/build/CMakeFiles/rebuild_cache.dir
+/home/lucas/Projects/ML-MCTS/build/third_party/SDL/CMakeFiles/SDL3-shared.dir
+/home/lucas/Projects/ML-MCTS/build/third_party/SDL/CMakeFiles/SDL3_test.dir
+/home/lucas/Projects/ML-MCTS/build/third_party/SDL/CMakeFiles/SDL_uclibc.dir
+/home/lucas/Projects/ML-MCTS/build/third_party/SDL/CMakeFiles/edit_cache.dir
+/home/lucas/Projects/ML-MCTS/build/third_party/SDL/CMakeFiles/rebuild_cache.dir
