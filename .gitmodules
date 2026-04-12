@@ -4,3 +4,6 @@
 [submodule "third_party/moodycamel"]
 	path = third_party/moodycamel
 	url = https://github.com/cameron314/concurrentqueue.git
+[submodule "third_party/wxWidgets"]
+	path = third_party/wxWidgets
+	url = https://github.com/wxWidgets/wxWidgets
