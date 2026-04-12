@@ -1,8 +1,7 @@
 #pragma once
-
 #include <vector>
 #include <string>
-#include <SDL3/SDL.h>
+#include <wx/wx.h>
 
 class UserInterface
 {
@@ -31,8 +30,8 @@ public:
     // =========================================================
 
     int CreateWindow();
-    int CloseWindow();
 
+    int CloseWindow();
 
     // =========================================================
     // RENDER ENTRY
