@@ -33,8 +33,6 @@ public:
     int CreateWindow();
     int CloseWindow();
 
-    void BeginFrame();
-    void EndFrame();
 
     // =========================================================
     // RENDER ENTRY
@@ -53,7 +51,7 @@ private:
 
     void RenderGPUPanel(const ThreadData& gpu);
 
-    void RenderMCTSThreads(const std::vector<ThreadData>& threads);
+    void (const std::vector<ThreadData>& threads);
 
     void RenderBottomBar(GlobalData& global);
 };
