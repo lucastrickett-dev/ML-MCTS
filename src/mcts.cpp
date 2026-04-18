@@ -2,12 +2,13 @@
 #include <forward_list>
 #include "mcts.h"
 #include "thread_interface.h"
-
+#include <barrier>
 
 
 template <GameTraits T>
 MCTSAgent<T>::MCTSAgent(MCTSAgentSetup<T> ctx)
     : _ctx(ctx.ctx)
+    , _barriers(ctx.barriers)
     , _tree(ctx.tree)
     , _request_queue(ctx.request_queue)
 {
@@ -74,7 +75,8 @@ void MCTSAgent<T>::SimulationSelector()
     // Apply virtual loss to leaf
     current->update(-VIRTUAL_LOSS_VALUE, 1);
 
-    // Ensure only one thread expands this leaf
+    // Turn on expanding flag to add node lock
+    // - Needed for multithreading so different threads dont work on same node
     bool expected = false;
     if (!current->is_expanding.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         // Another thread is already expanding — undo virtual loss and bail
@@ -84,9 +86,12 @@ void MCTSAgent<T>::SimulationSelector()
 
     // Check if terminal flag has already been set (faster than calling T::is_terminal)
     if (current->is_terminal.load(std::memory_order_acquire)) {
+        // Turn off expanding flag to remove node lock
         current->is_expanding.store(false, std::memory_order_release);
+
+        // Backpropogate result and record simulation (a valid simulation)
         backpropagate(T::get_winner(local_state), 0, current, local_root);
-        tree->record_sim();
+        tree->register_simulation();
         _local_simulation_count++;
         ctx->localSims = _local_simulation_count;
         return;
@@ -98,16 +103,19 @@ void MCTSAgent<T>::SimulationSelector()
         // Update node flags
         current->is_terminal.store(true, std::memory_order_relaxed);
         current->is_expanded.store(true, std::memory_order_relaxed);
+
+        // Turn off expanding flag to remove node lock
         current->is_expanding.store(false, std::memory_order_release);
 
         // Considered a simulation, so update
         backpropagate(T::get_winner(local_state), 0, current, local_root);
-        tree->record_sim();
+        tree->register_simulation();
         _local_simulation_count++;
         ctx->localSims = _local_simulation_count;
         return;
     }
 
+    // If we get here, we will have to actually evaluation the node
     // Build and submit inference request
     InferenceRequest<T> request {
         .state  = local_state,
@@ -130,6 +138,8 @@ void MCTSAgent<T>::SimulationSelector()
 
 // Function: SimulationEvaluator
 // * Second half of simulation (inference result -> expand -> backpropagate)
+// * The InferenceDispacher passes queswt thgrough NN and puts it back into 
+//   the local queue using the '.queue pointer' in the Request (line 123)
 template <GameTraits T>
 void MCTSAgent<T>::SimulationEvaluator(InferenceJob<T> inference_job)
 {
@@ -168,8 +178,8 @@ void MCTSAgent<T>::SimulationEvaluator(InferenceJob<T> inference_job)
     // Backpropagate real value up to root
     backpropagate(value, 0, leaf, root);
 
-    // Update global simulation tracker
-    tree->record_sim();
+    // Update global simulation tracker and register simulation tracker in tree
+    tree->register_simulation();
     _local_simulation_count++;
     _pending_inference_count--;
 
@@ -186,74 +196,90 @@ void MCTSAgent<T>::SimulationEvaluator(InferenceJob<T> inference_job)
 template <GameTraits T>
 void MCTSAgent<T>::run()
 {
-    while (_alive.load())
+    while (_alive.load(std::memory_order_acquire))
     {
-        if (_paused.load()) {
-            ctx->status = ThreadStatus::Paused;
-            std::this_thread::yield();
-            continue;
-        }
-
-        // Always drain completed jobs first
+        /*********************** RESET PHASE **********************/ 
+        // Exit Condition: Finish reset internal variables 
+        _pending_inference_count = 0;
+        _local_simulation_count = 0;
+        ctx->pendingJobs = 0;
+        ctx->localSims   = 0;
         InferenceJob<T> job;
-        while (_completed_queue.try_dequeue(job)) {
-            SimulationEvaluator(job);
-        }
+        while (_completed_queue.try_dequeue(job)) {}
 
-        if (_tree->_game_over.load(std::memory_order_relaxed)) {
-            // Game over — stop once all in-flight jobs are resolved
-            if (_pending_inference_count == 0) {
-                _running.store(false, std::memory_order_relaxed);
-                ctx->status = ThreadStatus::Stopped;
-            } else {
-                ctx->status = ThreadStatus::Stopping;
+        _barriers[BarrierPoint::RESET].arrive_and_wait(); // WAIT POINT <----------
+
+        /*********************** ACTIVE PHASE **********************/ 
+        // Exit Condition: Game Tree is over
+        bool _running = true;
+        while (_running) 
+        {
+            // Always drain completed jobs first
+            InferenceJob<T> job;
+            while (_completed_queue.try_dequeue(job)) {
+                SimulationEvaluator(job);
             }
-        } else {
-            // Game active — run new selections if under limit
-            if (_pending_inference_count < _max_pending) {
-                ctx->status = ThreadStatus::Running;
-                SimulationSelector();
+
+            // Queue the stop condition once tree has reached a stop point
+            if (_tree->_game_over.load(std::memory_order_relaxed)) {
+                // Game over — stop once all in-flight jobs are resolved
+                if (_pending_inference_count == 0) {
+                    _running = false;
+                } else {
+                    ctx->status = ThreadStatus::Stopping;
+                }
             } else {
-                ctx->status = ThreadStatus::Waiting;
+                // Game active — run new selections if under limit
+                if (_pending_inference_count < _max_pending) {
+                    ctx->status = ThreadStatus::Running;
+                    SimulationSelector();
+                } else {
+                    ctx->status = ThreadStatus::Waiting;
+                }
             }
         }
+        
+        ctx->status = ThreadStatus::Stopped;
+        _barriers[BarrierPoint::ACTIVE].arrive_and_wait(); // WAIT POINT <----------
+        
+        /*********************** TRAIN PHASE **********************/ 
+        // MCTS Doesnt really do anything during GPU training
+
+        _barriers[BarrierPoint::TRAIN].arrive_and_wait(); // WAIT POINT <----------
     }
 }
 
-// Used to reset internal states
-// Use case is that a new game has started, 
-// - Assume things like tree location ... etc are the same
-template <GameTraits T>
-bool MCTSAgent<T>::reset() {
-    _stop_flag.store(false);
-    _paused.store(false);
+// // Used to reset internal states
+// // Use case is that a new game has started, 
+// // - Assume things like tree location ... etc are the same
+// template <GameTraits T>
+// bool MCTSAgent<T>::reset() {
+//     _pending_inference_count = 0;
+//     _local_simulation_count = 0;
 
-    _pending_inference_count = 0;
-    _local_simulation_count = 0;
+//     ctx->pendingJobs = 0;
+//     ctx->localSims   = 0;
 
-    ctx->pendingJobs = 0;
-    ctx->localSims   = 0;
+//     // CRITICAL:
+//     InferenceJob<T> job;
+//     while (_completed_queue.try_dequeue(job)) {}
 
-    // CRITICAL:
-    InferenceJob<T> job;
-    while (_completed_queue.try_dequeue(job)) {}
-
-    return true;
-}
+//     return true;
+// }
 
 
-template <GameTraits T>
-bool MCTSAgent<T>::resume() {
-    _paused.store(false);
-}
+// template <GameTraits T>
+// bool MCTSAgent<T>::resume() {
+//     _paused.store(false);
+// }
 
-template <GameTraits T>
-bool MCTSAgent<T>::stop() {  // pause
-    _paused.store(true);
-}
+// template <GameTraits T>
+// bool MCTSAgent<T>::stop() {  // pause
+//     _paused.store(true);
+// }
 
-template <GameTraits T>
-bool MCTSAgent<T>::shutdown() {  // true kill
-    _alive.store(false);
-}
+// template <GameTraits T>
+// bool MCTSAgent<T>::shutdown() {  // true kill
+//     _alive.store(false);
+// }
 

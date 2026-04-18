@@ -7,6 +7,14 @@
 #include "readerwriterqueue.h"
 
 
+enum class BarrierPoint {
+    RESET,
+    ACTIVE,
+    TRAIN,
+    COUNT       // useful trick to get array size
+};
+
+
 template <GameTraits T> struct InferenceJob;
 template <GameTraits T> struct InferenceRequest;
 

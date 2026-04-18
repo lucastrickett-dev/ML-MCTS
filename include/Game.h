@@ -87,4 +87,9 @@ concept GameTraits = requires(
 
     // Edits the data within State corresponding to doing a certain action 
     { T::apply_action(ms, a)        } -> std::same_as<void>;
+
+#ifndef NEURAL_ENABLED
+    // If no neural network, need to have a rollout method
+    { T::rollout(s)                 } -> std::same_as<float>;
+#endif
 };

@@ -21,6 +21,7 @@ template <GameTraits T>
 struct MCTSAgentSetup {
     ThreadContext*                                    ctx;
     MCTSTree<T>*                                      tree;
+    std::barrier<>*                                   barriers;
     moodycamel::ConcurrentQueue<InferenceRequest<T>>* request_queue;
 };
 
@@ -136,13 +137,13 @@ struct MCTSTree {
         return parent->children;
     }
 
-    // Function: record_sim
+    // Function: register_simulation
     // MCTS Agents perform this when completing a new simulation, if we have 
     // met the required number of simulations per a move, we advance the root
     // * not perfect, simulation staged just before advance would increment counter
     //   correpsonding to next root, but simulation count only needs to be rough estimation
     template <GameTraits T>
-    void MCTSTree<T>::record_sim() {
+    void MCTSTree<T>::register_simulation() {
         uint64_t current = _localSims.fetch_add(1, std::memory_order_relaxed) + 1;
         if (current >= _targetSims) {
             _localSims.store(0, std::memory_order_relaxed);
@@ -179,6 +180,7 @@ struct MCTSTree {
         if (!best_child) return false;
 
         // Capture labelled data before advancing
+#ifdef NEURAL_ENABLED
         LabelledData<T> data_sample;
         T::get_data(root_state, data_sample.state.data());
 
@@ -187,7 +189,7 @@ struct MCTSTree {
             data_sample.policy[child.action] = child.visit_count.load(std::memory_order_relaxed) / total_visits;
 
         game_history.push_back(data_sample);
-
+#endif
         T::apply_action(root_state, best_child->action);
         root_node = best_child;
 
@@ -201,6 +203,7 @@ struct MCTSTree {
         return { root_node, root_state };
     }
 
+#ifdef NEURAL_ENABLED
     // Go through entire vector, add correct value (based of root_state)
     // and return
     std::vector<LabelledData<T>> get_game_history() {
@@ -214,6 +217,7 @@ struct MCTSTree {
 
         return game_history;
     }
+#endif
 };
 
 
@@ -230,7 +234,7 @@ class MCTSAgent {
     moodycamel::ConcurrentQueue<InferenceRequest<T>>* _request_queue;
 
     // Private result queue (dispatcher writes, this agent reads — SPSC)
-    moodycamel::ReaderWriterQueue<InferenceJob<T>>* _completed_queue;
+    moodycamel::ReaderWriterQueue<InferenceJob<T>> _completed_queue;
 
     // Jobs currently in flight awaiting GPU response
     size_t _pending_inference_count = 0;
@@ -238,11 +242,12 @@ class MCTSAgent {
     // Shared simulation counter across all agents
     size_t _local_simulation_count = 0;
 
+
+    std::barrier<>* _barriers;
+    
     // Stop signal
     std::atomic<bool> _alive = true;     // thread lifetime
     std::atomic<bool> _paused = false;   // pause/resume
-
-    std::atomic<bool> _stop_flag = false;
 
     // Output context of thread form which to update UI stuff
     ThreadContext* ctx;
@@ -254,14 +259,6 @@ class MCTSAgent {
     
     public:
     MCTSAgent(MCTSAgentSetup<T> ctx);
-    
-    bool reset(); // Reset agent for new game/tree
-    
-    void run();
-    
-    bool resume(); // Resume agent (ie continue working after stopping)
-    
-    bool stop();  // Hard stop the running state
-
-    bool shutdown();  // Hard stop the running state
+        
+    void run();    
 };
