@@ -1,0 +1,13 @@
+#pragma once
+
+#include "@GAME_INCLUDE@"
+using Game = @GAME_TYPE@;
+
+constexpr int   MAX_BATCH_SIZE        = @MAX_BATCH_SIZE@;
+constexpr int   INFERENCE_MAX_DELAY   = @INFERENCE_MAX_DELAY@;
+constexpr float VIRTUAL_LOSS_VALUE    = @VIRTUAL_LOSS_VALUE@;
+constexpr float MCTS_PUCT_CONSTANT    = @MCTS_PUCT_CONSTANT@;
+constexpr int   MCTS_THREAD_WORKERS   = @MCTS_THREAD_WORKERS@;
+constexpr int   PREALLOCATED_NODES    = @PREALLOCATED_NODES@;
+constexpr int   SIMULATIONS_PER_MOVE  = @SIMULATIONS_PER_MOVE@;
+constexpr int   MAX_PENDING_REQUESTS  = @MAX_PENDING_REQUESTS@;
