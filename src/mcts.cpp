@@ -3,7 +3,7 @@
 #include "mcts.h"
 #include <barrier>
 #include "fsm.h"
-#include "generated/config.h"
+#include "config.h"
 
 template class MCTSAgent<Game>;
 
@@ -59,13 +59,14 @@ void MCTSAgent<T>::SimulationSelector()
         current->update(-VIRTUAL_LOSS_VALUE, 1);
                     
         uint32_t parent_visits = current->visit_count.load(std::memory_order_relaxed);
+        float sqrt_visit = std::sqrt(static_cast<float>(parent_visits));
 
         // Look through all children to find highest PUCT
         MCTSNode<T>* best_child = nullptr;
         float        best_score = -std::numeric_limits<float>::infinity();
 
         for (MCTSNode<T>& child : current->children) {
-            float score = child.PUCT(parent_visits);
+            float score = child.PUCT(sqrt_visit);
             if (score > best_score) {
                 best_score = score;
                 best_child = &child;

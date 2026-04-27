@@ -8,7 +8,7 @@
 #include "readerwriterqueue.h"
 #include "concurrentqueue.h"
 #include "neural.h"
-#include "generated/config.h"
+#include "config.h"
  
 #define THREAD_COUNT (MCTS_THREAD_WORKERS + 1)
 

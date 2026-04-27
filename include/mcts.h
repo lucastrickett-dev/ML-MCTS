@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <shared_mutex>
 #include "Game.h"
-#include "generated/config.h"
+#include "config.h"
 #include "fsm.h"
 #include "concurrentqueue.h"
 #include "readerwriterqueue.h"
@@ -27,13 +27,14 @@ struct LabelledData {
 #endif 
 
 
+
 //=============================================================
 // Struct: MCTSNode
 // * Open-loop node — stores action that led here, tree pointers,
 //   and MCTS statistics. Does NOT store game state.
 //=============================================================
 template <GameTraits T>
-struct MCTSNode {
+struct alignas(64) MCTSNode {
     //----- Game data -----
     typename T::Action action = {};
     
@@ -57,12 +58,11 @@ struct MCTSNode {
     std::atomic<float>    value_sum   = 0.0f;
     std::atomic<uint32_t> visit_count = 0;
     
-    float PUCT(uint32_t parent_visits) const {
+    float PUCT(float sqrt_visits) const {
         uint32_t n = visit_count.load(std::memory_order_relaxed);
         float    w = value_sum.load(std::memory_order_relaxed);
         float    q = (n == 0) ? 0.0f : (w / static_cast<float>(n));
-        float    u = MCTS_PUCT_CONSTANT * prior 
-                     * std::sqrt(static_cast<float>(parent_visits)) 
+        float    u = MCTS_PUCT_CONSTANT * prior * sqrt_visits 
                      / (1.0f + static_cast<float>(n));
         return q + u;
     }
@@ -124,7 +124,7 @@ struct MCTSTree {
     // Store the history of the game for neural training
     std::atomic<bool> _game_over = false;
     std::atomic<bool> _advancing = false;
-    std::atomic<int> _move_simulation_count = 0;
+    std::atomic<uint32_t> _move_simulation_count = 0;
     #ifdef NEURAL_ENABLED
     std::vector<LabelledData<T>> _game_history;
     #endif
@@ -204,7 +204,7 @@ struct MCTSTree {
     // * not perfect, simulation staged just before advance would increment counter
     //   correpsonding to next root, but simulation count only needs to be rough estimation
     void register_simulation() {
-        uint64_t current = _move_simulation_count.fetch_add(1, std::memory_order_relaxed) + 1;
+        uint32_t current = _move_simulation_count.fetch_add(1, std::memory_order_relaxed) + 1;
         if (current >= SIMULATIONS_PER_MOVE) {
             bool expected = false;
             if (_advancing.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
@@ -227,11 +227,11 @@ struct MCTSTree {
 
         _ctx->totalSims = 0;
         _ctx->totalMoves++;
-        std::unique_lock lock(root_mutex);
         
         MCTSNode<T>* best_child  = nullptr;
         size_t       best_visits = 0;
         float        total_visits = 0.0f;
+
         
         // Single pass — find best child and sum visits for policy normalisation
         for (MCTSNode<T>& child : root_node->children) {
@@ -257,6 +257,8 @@ struct MCTSTree {
         }
         _game_history.push_back(data_sample);
         #endif
+        // 
+        std::unique_lock lock(root_mutex);
         T::apply_action(root_state, best_child->action);
         root_node = best_child;
         

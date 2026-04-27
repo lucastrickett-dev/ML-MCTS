@@ -48,7 +48,6 @@ add_subdirectory(Games)
 add_executable(ML-MCTS
     ${SRC_FILES}
     ${INCLUDE_FILES}
-    Games/TicTacToe/TicTacToe.h
 )
 
 
@@ -64,8 +63,8 @@ set(PREALLOCATED_NODES      1000000)
 set(MCTS_THREAD_WORKERS     6)
 set(MAX_PENDING_REQUESTS    64)
 
-set(GAME_TYPE TicTacToe)
-set(GAME_INCLUDE "TicTacToe/TicTacToe.h")
+set(GAME_TYPE UltimateXO)
+set(GAME_INCLUDE "UltimateXO/UltimateXO.h")
 
 
 configure_file(

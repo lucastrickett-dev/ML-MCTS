@@ -7,7 +7,7 @@
 #include "neural.h"
 #include "concurrentqueue.h"
 #include "fsm.h"
-#include "generated/config.h"
+#include "config.h"
 #ifdef NEURAL_ENABLED
 #include "torch.h"
 #endif
@@ -17,16 +17,16 @@ template class InferenceDispatcher<Game>;
 
 template <GameTraits T>
 InferenceDispatcher<T>::InferenceDispatcher(ThreadContext* ctx,
-                                            MCTSTree<T>* tree,
+                                            MCTSTree<T>*  tree,
 #ifdef NEURAL_ENABLED
-                                            torch::Device device,
+                                            torch::Device              device,
                                             std::optional<std::string> model_path,
-                                            NeuralConfig cfg = {},
+                                            NeuralConfig               cfg,
 #endif
                                             std::barrier<BarrierCompletion>* barriers,
-                                            std::atomic<bool>* training,
-                                            bool* paused,
-                                            bool* shutdown,
+                                            std::atomic<bool>*               training,
+                                            bool*                            paused,
+                                            bool*                            shutdown,
                                             moodycamel::ConcurrentQueue<InferenceRequest<T>>& request_queue)
     : _ctx(ctx)
     , _tree(tree)
@@ -47,7 +47,7 @@ InferenceDispatcher<T>::InferenceDispatcher(ThreadContext* ctx,
         { (int64_t)MAX_BATCH_SIZE,
           (int64_t)T::neural_feature_channels,
           (int64_t)T::neural_input_height,
-          (int64_t)T::neural_input_width 
+          (int64_t)T::neural_input_width
         },
         torch::TensorOptions()
             .dtype(torch::kFloat32)
@@ -72,10 +72,10 @@ InferenceDispatcher<T>::InferenceDispatcher(ThreadContext* ctx,
         { (int64_t)MAX_BATCH_SIZE,
           (int64_t)T::neural_feature_channels,
           (int64_t)T::neural_input_height,
-          (int64_t)T::neural_input_width 
+          (int64_t)T::neural_input_width
         }
     ).to(device);
-    
+
     auto [policy_head, value_head] = model->forward(dummy);
 
     TORCH_CHECK(value_head.sizes()  == torch::IntArrayRef({(int64_t)MAX_BATCH_SIZE, 1}),
@@ -111,10 +111,10 @@ bool InferenceDispatcher<T>::process_batch() {
 
     // Route results back to the requesting agent's SPSC queue
     for (size_t i = 0; i < count; i++) {
-        InferenceJob<T> job { 
-            .state = _batch[i].state, 
-            .leaf = _batch[i].leaf, 
-            .root = _batch[i].root,
+        InferenceJob<T> job {
+            .state = _batch[i].state,
+            .leaf  = _batch[i].leaf,
+            .root  = _batch[i].root,
             .value = value_acc[i][0],
         };
 
@@ -128,66 +128,60 @@ bool InferenceDispatcher<T>::process_batch() {
     std::array<typename T::Action, T::max_actions> action_buf;
 
     for (size_t i = 0; i < count; i++) {
-        InferenceJob<T> job { 
-            .state = _batch[i].state, 
-            .leaf = _batch[i].leaf, 
-            .root = _batch[i].root
+        InferenceJob<T> job {
+            .state = _batch[i].state,
+            .leaf  = _batch[i].leaf,
+            .root  = _batch[i].root
         };
 
-        // Random rollout for value from leaf's perspective
         job.value = T::rollout(_batch[i].state);
 
-        // Uniform policy over legal moves only
-        size_t move_count = T::get_actions(_batch[i].state, action_buf);  // was 'state', wrong var
+        size_t move_count = T::get_actions(_batch[i].state, action_buf);
 
         job.policy.fill(0.0f);
-        for (size_t j = 0; j < move_count; j++) {                       // was 'i', shadows outer i
-            job.policy[action_buf[j]] = 1.0f;                           // was 'action', undefined
+        for (size_t j = 0; j < move_count; j++) {
+            job.policy[action_buf[j]] = 1.0f;
         }
+
         bool ok = _batch[i].queue->try_enqueue(job);
+        assert(ok && "completed_queue full — raise MAX_PENDING_REQUESTS");
     }
 #endif
     _ctx->localSims += count;
-    // Return true as inference was done
     return true;
 }
 
 
-// Function: Main logic loop for thread
-// Entire purpose of thread is to take input requests and 
-// output jobs for MCTS threads to complete
-// * It should also do training since theres no reason for it not to I believe
 template <GameTraits T>
 void InferenceDispatcher<T>::run() {
     while (!(*_shutdown))
     {
-        /*********************** RESET PHASE **********************/ 
-        // Exit Condition: Finish reset internal variables 
+        // ── RESET ─────────────────────────────────────────────────────────────
         _ctx->status = ThreadStatus::Reset;
         InferenceRequest<T> request;
-        _training->store(false, std::memory_order_release); // set to false
+        _training->store(false, std::memory_order_release);
         while (_request_queue.try_dequeue(request)) {}
 
         _ctx->localSims   = 0;
         _ctx->pendingJobs = 0;
 
         _tree->reset();
-        _barriers[static_cast<int>(BarrierPoint::RESET)].arrive_and_wait(); // WAIT POINT <----------
+        _barriers[static_cast<int>(BarrierPoint::RESET)].arrive_and_wait();
 
-        /*********************** ACTIVE PHASE **********************/ 
-        // Exit Condition: Game Tree is over
+        // ── ACTIVE ────────────────────────────────────────────────────────────
         _ctx->status = ThreadStatus::Inference;
-
-        // Set barrier active since phase should only care about MCTS states
         (void)_barriers[static_cast<int>(BarrierPoint::ACTIVE)].arrive();
+
         auto last_dispatch = std::chrono::steady_clock::now();
-        
+
         while (!_training->load(std::memory_order_acquire))
         {
-            size_t queued = _request_queue.size_approx();
+            size_t queued     = _request_queue.size_approx();
+            _ctx->pendingJobs = queued;
 
             auto now     = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_dispatch);
+
             if (queued >= MAX_BATCH_SIZE || (queued > 0 && elapsed.count() >= INFERENCE_MAX_DELAY))
             {
                 process_batch();
@@ -198,9 +192,8 @@ void InferenceDispatcher<T>::run() {
         }
 
         while (_request_queue.try_dequeue(request)) {}
-        
-        /*********************** TRAIN PHASE **********************/ 
-        // If NN enabled, take information from tree and train NN
+
+        // ── TRAIN ─────────────────────────────────────────────────────────────
 #ifdef NEURAL_ENABLED
         _ctx->status = ThreadStatus::Training;
 
@@ -209,25 +202,27 @@ void InferenceDispatcher<T>::run() {
         if (!training_data.empty()) {
             model->train();
 
+            // Use cfg.lr, which decays across games (see below)
             torch::optim::SGD opt(
                 model->parameters(),
-                torch::optim::SGDOptions(0.01).momentum(0.9).weight_decay(1e-4)
+                torch::optim::SGDOptions(_cfg.lr).momentum(0.9).weight_decay(1e-4)
             );
-            train_epoch<T>(*model, opt,  , /*batch_size=*/256, _device);
+
+            train_epoch<T>(*model, opt, training_data, /*batch_size=*/256, _device, _cfg.train_epochs);
 
             model->eval();
 
-            // Save to explicit path if given, otherwise fall back to default
+            // Decay LR for next game so the model doesn't overfit as it matures
+            _cfg.lr *= _cfg.lr_decay;
+
             const std::string save_path = _model_path.value_or("neural/neural");
             torch::save(model, save_path + ".pt");
-            save_config(_cfg, save_path);
+            save_config(_cfg, save_path);   // persists the decayed LR for next run
         }
 
         _ctx->status = ThreadStatus::Stopped;
 #endif
-        _training->store(false, std::memory_order_release); // set to false
-        _barriers[static_cast<int>(BarrierPoint::TRAIN)].arrive_and_wait(); // WAIT POINT <----------
+        _training->store(false, std::memory_order_release);
+        _barriers[static_cast<int>(BarrierPoint::TRAIN)].arrive_and_wait();
     }
 }
-
-

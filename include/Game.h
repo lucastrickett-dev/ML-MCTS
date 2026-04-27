@@ -31,7 +31,7 @@ concept GameTraits = requires(
     const typename T::State&                         s,
     typename T::State&                               ms,
     typename T::Action                               a,
-    std::vector<float>&                              buf,
+    float*                                           buf,
     std::array<typename T::Action, T::max_actions>&  action_buf
 ) {
     typename T::State;
